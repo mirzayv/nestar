@@ -4,6 +4,9 @@
 PORT_API=3007
 PORT_BATCH=3008
 
+MONGO_DEV=mongodb+srv://komron:Komron2026dev@cluster0.jhplugm.mongodb.net/Nestar?readPreference=primary&appname=MongoDB%20Compass&retryWrites=true&ssl=true
+MONGO_PROD=mongodb+srv://komron:Komron2026dev@cluster0.jhplugm.mongodb.net/Nestar?readPreference=primary&appname=MongoDB%20Compass&retryWrites=true&ssl=true
+
 ===== FILE: .prettierrc =====
 
 {
@@ -68,7 +71,7 @@ PORT_BATCH=3008
     "start:dev": "nest start --watch",
     "start:dev:batch": "nest start nestar-batch --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/apps/nestar-api/main",
+    "start:prod": "cross-env NODE_ENV=production node dist/apps/nestar-api/main",
     "start:prodz:batch": "node dist/apps/nestar-batch/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
@@ -114,6 +117,7 @@ PORT_BATCH=3008
     "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
+    "cross-env": "^10.1.0",
     "eslint": "^8.42.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
@@ -149,7 +153,6 @@ PORT_BATCH=3008
     ]
   }
 }
-
 
 ===== FILE: README.md =====
 
@@ -390,19 +393,185 @@ bootstrap();
 import { Module } from '@nestjs/common';
 import { MemberModule } from './member/member.module';
 import { PropertyModule } from './property/property.module';
+import { AuthModule } from './auth/auth.module';
+import { CommentModule } from './comment/comment.module';
+import { LikeModule } from './like/like.module';
+import { ViewModule } from './view/view.module';
+import { FollowModule } from './follow/follow.module';
+import { BoardArticleModule } from './board-article/board-article.module';
 
 @Module({
-  imports: [MemberModule, PropertyModule]
+	imports: [
+		MemberModule,
+		AuthModule,
+		PropertyModule,
+		BoardArticleModule,
+		LikeModule,
+		ViewModule,
+		CommentModule,
+		FollowModule,
+	],
 })
 export class ComponentsModule {}
+
+
+===== FILE: apps\nestar-api\src\components\auth\auth.module.ts =====
+
+import { Module } from '@nestjs/common';
+
+@Module({})
+export class AuthModule {}
+
+
+===== FILE: apps\nestar-api\src\components\board-article\board-article.module.ts =====
+
+import { Module } from '@nestjs/common';
+
+@Module({})
+export class BoardArticleModule {}
+
+
+===== FILE: apps\nestar-api\src\components\comment\comment.module.ts =====
+
+import { Module } from '@nestjs/common';
+
+@Module({})
+export class CommentModule {}
+
+
+===== FILE: apps\nestar-api\src\components\follow\follow.module.ts =====
+
+import { Module } from '@nestjs/common';
+
+@Module({})
+export class FollowModule {}
+
+
+===== FILE: apps\nestar-api\src\components\like\like.module.ts =====
+
+import { Module } from '@nestjs/common';
+
+@Module({})
+export class LikeModule {}
 
 
 ===== FILE: apps\nestar-api\src\components\member\member.module.ts =====
 
 import { Module } from '@nestjs/common';
+import { MemberResolver } from './member.resolver';
+import { MemberService } from './member.service';
+import { MongooseModule } from '@nestjs/mongoose';
+import MemberSchema from '../../schemas/Member.model';
 
-@Module({})
+@Module({
+	imports: [MongooseModule.forFeature([{ name: 'Member', schema: MemberSchema }])],
+	providers: [MemberResolver, MemberService],
+})
 export class MemberModule {}
+
+
+===== FILE: apps\nestar-api\src\components\member\member.resolver.ts =====
+
+import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { MemberService } from './member.service';
+import { InternalServerErrorException, UsePipes, ValidationPipe } from '@nestjs/common';
+import { LoginInput, MemberInput } from '../../libs/dto/member/member.input';
+import { Member } from '../../libs/dto/member/member';
+
+@Resolver()
+export class MemberResolver {
+	constructor(private readonly memberService: MemberService) {}
+
+	@Mutation(() => Member)
+	@UsePipes(ValidationPipe)
+	public async signup(@Args('input') input: MemberInput): Promise<Member> {
+		try {
+			console.log('Mutation: signup');
+			console.log('input:', input);
+			return this.memberService.signup(input);
+		} catch (err) {
+			console.log('Error, signup:', err);
+			throw new InternalServerErrorException(err);
+		}
+	}
+
+	@Mutation(() => Member)
+	@UsePipes(ValidationPipe)
+	public async login(@Args('input') input: LoginInput): Promise<Member> {
+		try {
+			console.log('Mutation: login');
+			return this.memberService.login(input);
+		} catch (err) {
+			console.log('Error, signup:', err);
+			throw new InternalServerErrorException(err);
+		}
+	}
+
+	@Mutation(() => String)
+	public async updateMember(): Promise<string> {
+		console.log('Mutation: updateMember');
+		return this.memberService.updateMember();
+	}
+
+	@Query(() => String)
+	public async getMember(): Promise<string> {
+		console.log('Query: getMember');
+		return this.memberService.getMember();
+	}
+}
+
+
+===== FILE: apps\nestar-api\src\components\member\member.service.ts =====
+
+import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { Member } from '../../libs/dto/member/member';
+import { LoginInput, MemberInput } from '../../libs/dto/member/member.input';
+import { MemberStatus } from '../../libs/enums/member.enum';
+import { Message } from '../../libs/enums/common.enum';
+
+@Injectable()
+export class MemberService {
+	constructor(@InjectModel('Member') private readonly memberModel: Model<Member>) {}
+
+	public async signup(input: MemberInput): Promise<Member> {
+		// TODO: Hash password
+		try {
+			const result = await this.memberModel.create(input);
+			// TODO: Authentication via TOKEN
+			return result;
+		} catch (err) {
+			console.log('Error, Service.model:', err);
+			throw new BadRequestException(err);
+		}
+	}
+
+	public async login(input: LoginInput): Promise<Member> {
+		const { memberNick, memberPassword } = input;
+		const response = await this.memberModel.findOne({ memberNick: memberNick }).select('+memberPassword').exec();
+
+		if (!response || response.memberStatus === MemberStatus.DELETE) {
+			throw new InternalServerErrorException(Message.NO_MEMBER_NICK);
+		} else if (response.memberStatus === MemberStatus.BLOCK) {
+			throw new InternalServerErrorException(Message.BLOCKED_USER);
+		}
+
+		// TODO: Compare passwords
+		const isMatch = memberPassword === response.memberPassword;
+		if (!isMatch) throw new InternalServerErrorException(Message.WRONG_PASSWORD);
+
+		return response;
+	}
+
+	public async updateMember(): Promise<string> {
+		return 'updateMember executed!';
+	}
+
+	public async getMember(): Promise<string> {
+		return 'getMember executed!';
+	}
+}
 
 
 ===== FILE: apps\nestar-api\src\components\property\property.module.ts =====
@@ -413,15 +582,218 @@ import { Module } from '@nestjs/common';
 export class PropertyModule {}
 
 
-===== FILE: apps\nestar-api\src\database\database.module.ts =====
+===== FILE: apps\nestar-api\src\components\view\view.module.ts =====
 
 import { Module } from '@nestjs/common';
 
 @Module({})
-export class DatabaseModule {}
+export class ViewModule {}
+
+
+===== FILE: apps\nestar-api\src\database\database.module.ts =====
+
+import { Module } from '@nestjs/common';
+import { InjectConnection, MongooseModule } from '@nestjs/mongoose';
+import { Connection } from 'mongoose';
+
+@Module({
+	imports: [
+		MongooseModule.forRootAsync({
+			useFactory: () => ({
+				uri: process.env.NODE_ENV === 'production' ? process.env.MONGO_PROD : process.env.MONGO_DEV,
+			}),
+		}),
+	],
+	exports: [MongooseModule],
+})
+export class DatabaseModule {
+	constructor(@InjectConnection() private readonly connection: Connection) {
+		if (connection.readyState === 1) {
+			console.log(
+				`MongoDB is connected into ${process.env.NODE_ENV === 'production' ? 'production' : 'development'} db`,
+			);
+		} else {
+			console.log('DB is not connected!');
+		}
+	}
+}
 
 
 ===== FILE: apps\nestar-api\src\libs\config.ts =====
+
+
+===== FILE: apps\nestar-api\src\libs\dto\member\member.input.ts =====
+
+import { Field, InputType } from '@nestjs/graphql';
+import { IsNotEmpty, IsOptional, Length } from 'class-validator';
+import { MemberAuthType, MemberType } from '../../enums/member.enum';
+
+@InputType()
+export class MemberInput {
+	@IsNotEmpty()
+	@Length(3, 12)
+	@Field(() => String)
+	memberNick!: string;
+
+	@IsNotEmpty()
+	@Length(5, 12)
+	@Field(() => String)
+	memberPassword!: string;
+
+	@IsNotEmpty()
+	@Field(() => String)
+	memberPhone!: string;
+
+	@IsOptional()
+	@Field(() => MemberType, { nullable: true })
+	memberType?: MemberType;
+
+	@IsOptional()
+	@Field(() => MemberAuthType, { nullable: true })
+	memberAuthType?: MemberAuthType;
+}
+
+@InputType()
+export class LoginInput {
+	@IsNotEmpty()
+	@Length(3, 12)
+	@Field(() => String)
+	memberNick!: string;
+
+	@IsNotEmpty()
+	@Length(5, 12)
+	@Field(() => String)
+	memberPassword!: string;
+}
+
+
+===== FILE: apps\nestar-api\src\libs\dto\member\member.ts =====
+
+import { Field, Int, ObjectType } from '@nestjs/graphql';
+import { ObjectId } from 'mongoose';
+import { MemberAuthType, MemberStatus, MemberType } from '../../enums/member.enum';
+
+@ObjectType()
+export class Member {
+	@Field(() => String)
+	_id!: string;
+
+	@Field(() => MemberType)
+	memberType!: MemberType;
+
+	@Field(() => MemberStatus)
+	memberStatus!: MemberStatus;
+
+	@Field(() => MemberAuthType)
+	memberAuthType!: MemberAuthType;
+
+	@Field(() => String)
+	memberPhone!: string;
+
+	@Field(() => String)
+	memberNick!: string;
+
+	memberPassword?: string;
+
+	@Field(() => String, { nullable: true })
+	memberFullName?: string;
+
+	@Field(() => String)
+	memberImage!: string;
+
+	@Field(() => String, { nullable: true })
+	memberAddress?: string;
+
+	@Field(() => String, { nullable: true })
+	memberDesc?: string;
+
+	@Field(() => Int)
+	memberProperties!: number;
+
+	@Field(() => Int)
+	memberArticles!: number;
+
+	@Field(() => Int)
+	memberFollowers!: number;
+
+	@Field(() => Int)
+	memberFollowings!: number;
+
+	@Field(() => Int)
+	memberPoints!: number;
+
+	@Field(() => Int)
+	memberLikes!: number;
+
+	@Field(() => Int)
+	memberViews!: number;
+
+	@Field(() => Int)
+	memberComments!: number;
+
+	@Field(() => Int)
+	memberRank!: number;
+
+	@Field(() => Int)
+	memberWarnings!: number;
+
+	@Field(() => Int)
+	memberBlocks!: number;
+
+	@Field(() => Date, { nullable: true })
+	deletedAt?: Date;
+
+	@Field(() => Date)
+	createdAt!: Date;
+
+	@Field(() => Date)
+	updatedAt!: Date;
+}
+
+
+===== FILE: apps\nestar-api\src\libs\enums\board-article.enum.ts =====
+
+import { registerEnumType } from '@nestjs/graphql';
+
+export enum BoardArticleCategory {
+	FREE = 'FREE',
+	RECOMMEND = 'RECOMMEND',
+	NEWS = 'NEWS',
+	HUMOR = 'HUMOR',
+}
+registerEnumType(BoardArticleCategory, {
+	name: 'BoardArticleCategory',
+});
+
+export enum BoardArticleStatus {
+	ACTIVE = 'ACTIVE',
+	DELETE = 'DELETE',
+}
+registerEnumType(BoardArticleStatus, {
+	name: 'BoardArticleStatus',
+});
+
+
+===== FILE: apps\nestar-api\src\libs\enums\comment.enum.ts =====
+
+import { registerEnumType } from '@nestjs/graphql';
+
+export enum CommentStatus {
+	ACTIVE = 'ACTIVE',
+	DELETE = 'DELETE',
+}
+registerEnumType(CommentStatus, {
+	name: 'CommentStatus',
+});
+
+export enum CommentGroup {
+	MEMBER = 'MEMBER',
+	ARTICLE = 'ARTICLE',
+	PROPERTY = 'PROPERTY',
+}
+registerEnumType(CommentGroup, {
+	name: 'CommentGroup',
+});
 
 
 ===== FILE: apps\nestar-api\src\libs\enums\common.enum.ts =====
@@ -447,11 +819,699 @@ export enum Message {
 }
 
 
+===== FILE: apps\nestar-api\src\libs\enums\like.enum.ts =====
+
+import { registerEnumType } from '@nestjs/graphql';
+
+export enum LikeGroup {
+	MEMBER = 'MEMBER',
+	PROPERTY = 'PROPERTY',
+	ARTICLE = 'ARTICLE',
+}
+registerEnumType(LikeGroup, {
+	name: 'LikeGroup',
+});
+
+
+===== FILE: apps\nestar-api\src\libs\enums\member.enum.ts =====
+
+import { registerEnumType } from '@nestjs/graphql';
+
+export enum MemberType {
+	USER = 'USER',
+	AGENT = 'AGENT',
+	ADMIN = 'ADMIN',
+}
+registerEnumType(MemberType, {
+	name: 'MemberType',
+});
+
+export enum MemberStatus {
+	ACTIVE = 'ACTIVE',
+	BLOCK = 'BLOCK',
+	DELETE = 'DELETE',
+}
+registerEnumType(MemberStatus, {
+	name: 'MemberStatus',
+});
+
+export enum MemberAuthType {
+	PHONE = 'PHONE',
+	EMAIL = 'EMAIL',
+	TELEGRAM = 'TELEGRAM',
+}
+registerEnumType(MemberAuthType, {
+	name: 'MemberAuthType',
+});
+
+
+===== FILE: apps\nestar-api\src\libs\enums\notice.enum.ts =====
+
+import { registerEnumType } from '@nestjs/graphql';
+
+export enum NoticeCategory {
+	FAQ = 'FAQ',
+	TERMS = 'TERMS',
+	INQUIRY = 'INQUIRY',
+}
+registerEnumType(NoticeCategory, {
+	name: 'NoticeCategory',
+});
+
+export enum NoticeStatus {
+	HOLD = 'HOLD',
+	ACTIVE = 'ACTIVE',
+	DELETE = 'DELETE',
+}
+registerEnumType(NoticeStatus, {
+	name: 'NoticeStatus',
+});
+
+
+===== FILE: apps\nestar-api\src\libs\enums\notification.enum.ts =====
+
+import { registerEnumType } from '@nestjs/graphql';
+
+export enum NotificationType {
+	LIKE = 'LIKE',
+	COMMENT = 'COMMENT',
+}
+registerEnumType(NotificationType, {
+	name: 'NotificationType',
+});
+
+export enum NotificationStatus {
+	WAIT = 'WAIT',
+	READ = 'READ',
+}
+registerEnumType(NotificationStatus, {
+	name: 'NotificationStatus',
+});
+
+export enum NotificationGroup {
+	MEMBER = 'MEMBER',
+	ARTICLE = 'ARTICLE',
+	PROPERTY = 'PROPERTY',
+}
+registerEnumType(NotificationGroup, {
+	name: 'NotificationGroup',
+});
+
+
+===== FILE: apps\nestar-api\src\libs\enums\property.enum.ts =====
+
+import { registerEnumType } from '@nestjs/graphql';
+
+export enum PropertyType {
+	APARTMENT = 'APARTMENT',
+	VILLA = 'VILLA',
+	HOUSE = 'HOUSE',
+}
+registerEnumType(PropertyType, {
+	name: 'PropertyType',
+});
+
+export enum PropertyStatus {
+	HOLD = 'HOLD',
+	ACTIVE = 'ACTIVE',
+	SOLD = 'SOLD',
+	DELETE = 'DELETE',
+}
+registerEnumType(PropertyStatus, {
+	name: 'PropertyStatus',
+});
+
+export enum PropertyLocation {
+	SEOUL = 'SEOUL',
+	BUSAN = 'BUSAN',
+	INCHEON = 'INCHEON',
+	DAEGU = 'DAEGU',
+	GYEONGJU = 'GYEONGJU',
+	GWANGJU = 'GWANGJU',
+	CHONJU = 'CHONJU',
+	DAEJON = 'DAEJON',
+	JEJU = 'JEJU',
+}
+registerEnumType(PropertyLocation, {
+	name: 'PropertyLocation',
+});
+
+
+===== FILE: apps\nestar-api\src\libs\enums\view.enum.ts =====
+
+import { registerEnumType } from '@nestjs/graphql';
+
+export enum ViewGroup {
+	MEMBER = 'MEMBER',
+	ARTICLE = 'ARTICLE',
+	PROPERTY = 'PROPERTY',
+}
+registerEnumType(ViewGroup, {
+	name: 'ViewGroup',
+});
+
+
 ===== FILE: apps\nestar-api\src\libs\types\common.ts =====
 
 export interface T {
 	[key: string]: any;
 }
+
+
+===== FILE: apps\nestar-api\src\schemas\BoardArticle.model.ts =====
+
+import { Schema } from 'mongoose';
+import { BoardArticleCategory, BoardArticleStatus } from '../libs/enums/board-article.enum';
+
+const BoardArticleSchema = new Schema(
+	{
+		articleCategory: {
+			type: String,
+			enum: BoardArticleCategory,
+			required: true,
+		},
+
+		articleStatus: {
+			type: String,
+			enum: BoardArticleStatus,
+			default: BoardArticleStatus.ACTIVE,
+		},
+
+		articleTitle: {
+			type: String,
+			required: true,
+		},
+
+		articleContent: {
+			type: String,
+			required: true,
+		},
+
+		articleImage: {
+			type: String,
+		},
+
+		articleLikes: {
+			type: Number,
+			default: 0,
+		},
+
+		articleViews: {
+			type: Number,
+			default: 0,
+		},
+
+		articleComments: {
+			type: Number,
+			default: 0,
+		},
+
+		memberId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+			ref: 'Member',
+		},
+	},
+	{ timestamps: true, collection: 'boardArticles' },
+);
+
+export default BoardArticleSchema;
+
+
+===== FILE: apps\nestar-api\src\schemas\Comment.model.ts =====
+
+import { Schema } from 'mongoose';
+import { CommentGroup, CommentStatus } from '../libs/enums/comment.enum';
+
+const CommentSchema = new Schema(
+	{
+		commentStatus: {
+			type: String,
+			enum: CommentStatus,
+			default: CommentStatus.ACTIVE,
+		},
+
+		commentGroup: {
+			type: String,
+			enum: CommentGroup,
+			required: true,
+		},
+
+		commentContent: {
+			type: String,
+			required: true,
+		},
+
+		commentRefId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+		},
+
+		memberId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+		},
+	},
+	{ timestamps: true, collection: 'comments' },
+);
+
+export default CommentSchema;
+
+
+===== FILE: apps\nestar-api\src\schemas\Follow.model.ts =====
+
+import { Schema } from 'mongoose';
+
+const FollowSchema = new Schema(
+	{
+		followingId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+		},
+
+		followerId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+		},
+	},
+	{ timestamps: true, collection: 'follows' },
+);
+
+FollowSchema.index({ followingId: 1, followerId: 1 }, { unique: true });
+
+export default FollowSchema;
+
+
+===== FILE: apps\nestar-api\src\schemas\Like.model.ts =====
+
+import { Schema } from 'mongoose';
+import { ViewGroup } from '../libs/enums/view.enum';
+
+const LikeSchema = new Schema(
+	{
+		likeGroup: {
+			type: String,
+			enum: ViewGroup,
+			required: true,
+		},
+
+		likeRefId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+		},
+		
+		memberId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+			ref: 'Member',
+		},
+	},
+	{ timestamps: true, collection: 'likes' },
+);
+
+LikeSchema.index({ memberId: 1, likeRefId: 1 }, { unique: true });
+
+export default LikeSchema;
+
+
+===== FILE: apps\nestar-api\src\schemas\Member.model.ts =====
+
+import { Schema } from 'mongoose';
+import { MemberAuthType, MemberStatus, MemberType } from '../libs/enums/member.enum';
+
+const MemberSchema = new Schema(
+	{
+		memberType: {
+			type: String,
+			enum: MemberType,
+			default: MemberType.USER,
+		},
+
+		memberStatus: {
+			type: String,
+			enum: MemberStatus,
+			default: MemberStatus.ACTIVE,
+		},
+
+		memberAuthType: {
+			type: String,
+			enum: MemberAuthType,
+			default: MemberAuthType.PHONE,
+		},
+
+		memberPhone: {
+			type: String,
+			index: { unique: true, sparse: true },
+			required: true,
+		},
+
+		memberNick: {
+			type: String,
+			index: { unique: true, sparse: true },
+			required: true,
+		},
+
+		memberPassword: {
+			type: String,
+			select: false,
+			required: true,
+		},
+
+		memberFullName: {
+			type: String,
+		},
+
+		memberImage: {
+			type: String,
+			default: '',
+		},
+
+		memberAddress: {
+			type: String,
+		},
+
+		memberDesc: {
+			type: String,
+		},
+
+		memberProperties: {
+			type: Number,
+			default: 0,
+		},
+
+		memberArticles: {
+			type: Number,
+			default: 0,
+		},
+
+		memberFollowers: {
+			type: Number,
+			default: 0,
+		},
+
+		memberFollowings: {
+			type: Number,
+			default: 0,
+		},
+
+		memberPoints: {
+			type: Number,
+			default: 0,
+		},
+
+		memberLikes: {
+			type: Number,
+			default: 0,
+		},
+
+		memberViews: {
+			type: Number,
+			default: 0,
+		},
+
+		memberComments: {
+			type: Number,
+			default: 0,
+		},
+
+		memberRank: {
+			type: Number,
+			default: 0,
+		},
+
+		memberWarnings: {
+			type: Number,
+			default: 0,
+		},
+
+		memberBlocks: {
+			type: Number,
+			default: 0,
+		},
+
+		deletedAt: {
+			type: Date,
+		},
+	},
+	{ timestamps: true, collection: 'members' },
+);
+
+export default MemberSchema;
+
+
+===== FILE: apps\nestar-api\src\schemas\Notice.model.ts =====
+
+import mongoose, { Schema } from 'mongoose';
+import { NoticeCategory, NoticeStatus } from '../libs/enums/notice.enum';
+
+const NoticeSchema = new Schema(
+	{
+		noticeCategory: {
+			type: String,
+			enum: NoticeCategory,
+			required: true,
+		},
+
+		noticeStatus: {
+			type: String,
+			enum: NoticeStatus,
+			default: NoticeStatus.ACTIVE,
+		},
+
+		noticeTitle: {
+			type: String,
+			required: true,
+		},
+
+		noticeContent: {
+			type: String,
+			required: true,
+		},
+		
+		memberId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+			ref: 'Member',
+		},
+	},
+	{ timestamps: true, collection: 'notices' },
+);
+
+export default NoticeSchema;
+
+
+===== FILE: apps\nestar-api\src\schemas\Notification.model.ts =====
+
+import { Schema } from 'mongoose';
+import { NotificationGroup, NotificationStatus, NotificationType } from '../libs/enums/notification.enum';
+
+const NotificationSchema = new Schema(
+	{
+		notificationType: {
+			type: String,
+			enum: NotificationType,
+			required: true,
+		},
+
+		notificationStatus: {
+			type: String,
+			enum: NotificationStatus,
+			default: NotificationStatus.WAIT,
+		},
+
+		notificationGroup: {
+			type: String,
+			enum: NotificationGroup,
+			required: true,
+		},
+
+		notificationTitle: {
+			type: String,
+			required: true,
+		},
+
+		notificationDesc: {
+			type: String,
+		},
+
+		authorId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+			ref: 'Member',
+		},
+
+		receiverId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+			ref: 'Member',
+		},
+
+		propertyId: {
+			type: Schema.Types.ObjectId,
+			ref: 'Property',
+		},
+
+		articleId: {
+			type: Schema.Types.ObjectId,
+			ref: 'BoardArticle',
+		},
+	},
+	{ timestamps: true, collection: 'notifications' },
+);
+
+export default NotificationSchema;
+
+
+===== FILE: apps\nestar-api\src\schemas\Property.model.ts =====
+
+import { Schema } from 'mongoose';
+import { PropertyLocation, PropertyStatus, PropertyType } from '../libs/enums/property.enum';
+
+const PropertySchema = new Schema(
+	{
+		propertyType: {
+			type: String,
+			enum: PropertyType,
+			required: true,
+		},
+
+		propertyStatus: {
+			type: String,
+			enum: PropertyStatus,
+			default: PropertyStatus.ACTIVE,
+		},
+
+		propertyLocation: {
+			type: String,
+			enum: PropertyLocation,
+			required: true,
+		},
+
+		propertyAddress: {
+			type: String,
+			required: true,
+		},
+
+		propertyTitle: {
+			type: String,
+			required: true,
+		},
+
+		propertyPrice: {
+			type: Number,
+			required: true,
+		},
+
+		propertySquare: {
+			type: Number,
+			required: true,
+		},
+
+		propertyBeds: {
+			type: Number,
+			required: true,
+		},
+
+		propertyRooms: {
+			type: Number,
+			required: true,
+		},
+
+		propertyViews: {
+			type: Number,
+			default: 0,
+		},
+
+		propertyLikes: {
+			type: Number,
+			default: 0,
+		},
+
+		propertyComments: {
+			type: Number,
+			default: 0,
+		},
+
+		propertyRank: {
+			type: Number,
+			default: 0,
+		},
+
+		propertyImages: {
+			type: [String],
+			required: true,
+		},
+
+		propertyDesc: {
+			type: String,
+		},
+
+		propertyBarter: {
+			type: Boolean,
+			default: false,
+		},
+
+		propertyRent: {
+			type: Boolean,
+			default: false,
+		},
+
+		memberId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+			ref: 'Member',
+		},
+
+		soldAt: {
+			type: Date,
+		},
+
+		deletedAt: {
+			type: Date,
+		},
+
+		constructedAt: {
+			type: Date,
+		},
+	},
+	{ timestamps: true, collection: 'properties' },
+);
+
+PropertySchema.index({ propertyType: 1, propertyLocation: 1, propertyTitle: 1, propertyPrice: 1 }, { unique: true });
+
+export default PropertySchema;
+
+
+===== FILE: apps\nestar-api\src\schemas\View.model.ts =====
+
+import { Schema } from 'mongoose';
+import { ViewGroup } from '../libs/enums/view.enum';
+
+const ViewSchema = new Schema(
+	{
+		viewGroup: {
+			type: String,
+			enum: ViewGroup,
+			required: true,
+		},
+
+		viewRefId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+		},
+
+		memberId: {
+			type: Schema.Types.ObjectId,
+			required: true,
+			ref: 'Member',
+		},
+	},
+	{ timestamps: true, collection: 'views' },
+);
+
+ViewSchema.index({ memberId: 1, viewRefId: 1 }, { unique: true });
+
+export default ViewSchema;
 
 
 ===== FILE: apps\nestar-api\test\app.e2e-spec.ts =====
