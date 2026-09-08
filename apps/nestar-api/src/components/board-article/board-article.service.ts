@@ -12,7 +12,7 @@ import { ViewService } from '../view/view.service';
 import { Direction, Message } from '../../libs/enums/common.enum';
 import { BoardArticleStatus } from '../../libs/enums/board-article.enum';
 import { ViewGroup } from '../../libs/enums/view.enum';
-import { lookupMember, shapeIntoMongoObjectId } from '../../libs/config';
+import { lookupAuthMemberLiked, lookupMember, shapeIntoMongoObjectId } from '../../libs/config';
 import { StatisticModifier, T } from '../../libs/types/common';
 import { MemberService } from '../member/member.service';
 import { LikeService } from '../like/like.service';
@@ -117,7 +117,7 @@ export class BoardArticleService {
 						list: [
 							{ $skip: ((input.page ?? 1) - 1) * (input.limit ?? 10) },
 							{ $limit: input.limit ?? 10 },
-							// meLiked
+							lookupAuthMemberLiked(memberId),
 							lookupMember,
 							{ $unwind: '$memberData' },
 						],
