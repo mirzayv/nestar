@@ -102,23 +102,32 @@ export class PropertyService {
 	}
 
 	public async getProperties(memberId: ObjectId, input: PropertiesInquiry): Promise<Properties> {
-		const match: T = { propertyStatus: PropertyStatus.ACTIVE };
-		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
+		const match: T = { propertyStatus: PropertyStatus.ACTIVE }; //boshlang'ich filtr: faqat faol mulklar
+		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC }; //"agar foydalanuvchi saralash tanlamagan bo'lsa, sana bo'yicha sarala" degan mantiq
 
-		this.shapeMatchQuery(match, input);
+		this.shapeMatchQuery(match, input); //bu private metod chaqiriladi, u match obyektini referens orqali to'ldiradi (narx, joylashuv, xona soni kabi qo'shimcha filtrlarni qo'shadi) — bu bugungi darsga aloqasi yo'q, avvalgi darsdan qolgan
 		console.log('match:', match);
 
 		const result = await this.propertyModel
 			.aggregate([
+				//filtrlash va saralash.
 				{ $match: match },
 				{ $sort: sort },
 				{
 					$facet: {
+						//list qismida sahifalash ($skip, $limit),
 						list: [
 							{ $skip: (input.page - 1) * input.limit },
 							{ $limit: input.limit },
+							//va aynan mana shu qatorda:
+							//bu yerda lookupAuthMemberLikedga faqat bitta argument (memberId) beriladi — ikkinchi parametr (targetRefId) berilmagan,
+							// demak funksiya ichidagi default qiymat ('$_id') ishlatiladi.
+							// Bu mantiqiy: getPropertiesda biz "ro'yxatdagi har bir mulkning o'z _idsi" bo'yicha tekshiramiz — boshqa
+							// hech qanday maxsus maydon kerak emas (getFavoritesda esa $followingId yoki $followerId kabi boshqa maydon
+							// kerak bo'lgan edi, chunki u yerda mulk emas, a'zolar ro'yxati edi).
 							lookupAuthMemberLiked(memberId),
 							lookupMember,
+							//lookupMember (mulk egasining ma'lumotini olish uchun, avvalgi darsdan) va { $unwind: '$memberData' } boradi.
 							{ $unwind: '$memberData' },
 						],
 						metaCounter: [{ $count: 'total' }],
