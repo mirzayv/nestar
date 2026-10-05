@@ -1,69 +1,101 @@
-// Logger — NestJS'ning tayyor klassi, konsolga formatlangan, rangli, kontekst nomi bilan log yozish uchun ishlatiladi
 import { Logger } from '@nestjs/common';
 import { OnGatewayInit, SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { Server, WebSocket } from 'ws';
+import { Server } from 'ws';
+import * as WebSocket from 'ws';
+import { AuthService } from '../components/auth/auth.service';
+import * as url from 'url';
+import { Member } from '../libs/dto/member/member';
 
 interface MessagePayload {
 	event: string;
 	text: string;
+	memberData: Member | null;
 }
 
 interface InfoPayload {
 	event: string;
 	totalClients: number;
+	memberData: Member | null;
+	action: string;
 }
 
-// @WebSocketGateway decorator oddiy classni WebSocket serveriga aylantiradi; transports: ['websocket'] — faqat sof WebSocket protokolidan foydalanish; secure: false — development uchun shifrlanmagan ws:// (wss:// emas)
 @WebSocketGateway({ transports: ['websocket'], secure: false })
-// SocketGateway classi export qilinyapti va OnGatewayInit interfeysini "implements" qiladi — ya'ni "afterInit metodini albatta yozaman" deb va'da beradi
 export class SocketGateway implements OnGatewayInit {
-	// logger — private property, Logger klassidan yangi instansiya, argument sifatida 'SocketEventsGateway' nomi berilgan (bu nom har bir log yonida konsolda ko'rinadi)
 	private logger: Logger = new Logger('SocketEventsGateway');
-	// summaryClient — private property, tipi number, boshlang'ich qiymati 0, hozirda ulangan mijozlar sonini saqlaydi
 	private summaryClient: number = 0;
+	private clientsAuthMap = new Map<WebSocket, Member | null>();
+	private messagesList: MessagePayload[] = [];
+
+	constructor(private authService: AuthService) {}
+
 	@WebSocketServer()
 	server!: Server;
 
-	// afterInit — OnGatewayInit interfeysidan kelgan metod, WebSocket server to'liq ishga tushgandan keyin NestJS uni AVTOMATIK bir marta chaqiradi (siz qo'lda chaqirmaysiz)
-	public afterInit(server: Server) {
-		this.logger.verbose(`WebSocket Server Initialized & total [${this.summaryClient}]`);
+	public afterInit() {
+		this.logger.verbose(`WebSocket Server Initialized & total: [${this.summaryClient}]`);
 	}
 
-	// handleConnection — NestJS'ning maxsus "hook" metodi: nomi aynan shunday bo'lsa, HAR SAFAR yangi mijoz ulanganda avtomatik chaqiriladi; client — ulangan mijoz obyekti, ...args — rest parameter (qolgan barcha argumentlarni massivga yig'adi, bu yerda ishlatilmagan)
-	public handleConnection(client: WebSocket, ...args: any[]) {
-		// hisoblagich bittaga oshiriladi (++ operatori)
+	private async retrieveAuth(req: any): Promise<Member | null> {
+		try {
+			const parseUrl = url.parse(req.url, true);
+			const { token } = parseUrl.query;
+			return await this.authService.verifyToken(token as string);
+		} catch (err) {
+			//this.logger.warn(`Auth failed: ${(err as Error).message}`);
+			return null;
+		}
+	}
+
+	public async handleConnection(client: WebSocket, req: any) {
+		const authMember = await this.retrieveAuth(req);
 		this.summaryClient++;
-		this.logger.verbose(`Connection & total [${this.summaryClient}]`);
+		this.clientsAuthMap.set(client, authMember);
+
+		const clientNick: string = authMember?.memberNick ?? 'Guest';
+		this.logger.verbose(`Connected [${clientNick}] & total: [${this.summaryClient}]`);
 
 		const infoMsg: InfoPayload = {
 			event: 'info',
 			totalClients: this.summaryClient,
+			memberData: authMember,
+			action: 'joined',
 		};
 		this.emitMessage(infoMsg);
+		client.send(JSON.stringify({ event: 'getMessages', list: this.messagesList }));
 	}
 
-	// handleDisconnect — xuddi shunday hook, lekin mijoz uzilganda chaqiriladi (brauzer yopilganda, internet uzilganda)
 	public handleDisconnect(client: WebSocket) {
-		// hisoblagich bittaga kamaytiriladi (-- operatori)
+		const authMember = this.clientsAuthMap.get(client) ?? null;
 		this.summaryClient--;
-		this.logger.verbose(`Disconnection & total [${this.summaryClient}]`);
+		this.clientsAuthMap.delete(client);
+
+		const clientNick: string = authMember?.memberNick ?? 'Guest';
+		this.logger.verbose(`Disconnected [${clientNick}] & total: [${this.summaryClient}]`);
 
 		const infoMsg: InfoPayload = {
 			event: 'info',
 			totalClients: this.summaryClient,
+			memberData: authMember,
+			action: 'left',
 		};
 		this.broadcastMessage(client, infoMsg);
 	}
 
-	// @SubscribeMessage('message') decorator — NestJS'ga "mijozdan 'message' nomli xabar kelsa, aynan shu metodni chaqir" deb ko'rsatadi; bu GraphQL'dagi @Query/@Mutation'ning WebSocket dunyosidagi ekvivalenti
 	@SubscribeMessage('message')
-	public async handleMessage(client: WebSocket, payload: string): Promise<void> {
+	public handleMessage(client: WebSocket, payload: string): void {
+		const authMember = this.clientsAuthMap.get(client) ?? null;
 		const newMessage: MessagePayload = {
 			event: 'message',
 			text: payload,
+			memberData: authMember,
 		};
 
-		this.logger.verbose(`NEW MESSAGE: ${payload}`);
+		const clientNick: string = authMember?.memberNick ?? 'Guest';
+		this.logger.verbose(`NEW MESSAGE [${clientNick}]: ${payload}`);
+
+		this.messagesList.push(newMessage);
+		if (this.messagesList.length > 5) this.messagesList.splice(0, this.messagesList.length - 5);
+
 		this.emitMessage(newMessage);
 	}
 
@@ -83,3 +115,10 @@ export class SocketGateway implements OnGatewayInit {
 		});
 	}
 }
+
+/*
+MESSAGE TARGET:
+1. Client (only client)
+2. Broadcast (except client)
+3. Emit (all clients)
+*/
